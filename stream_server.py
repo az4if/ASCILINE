@@ -101,7 +101,7 @@ def build_queue(args) -> list[dict]:
         return load_folder(args.folder, args.mode, args.vol)
 
     # Legacy: single video argument
-    return [{"video": args.video, "mode": args.mode, "vol": args.vol}]
+    return [{"video": resolve_video_path(args.video), "mode": args.mode, "vol": args.vol}]
 
 
 # ── APP STATE ──────────────────────────────────────────────
