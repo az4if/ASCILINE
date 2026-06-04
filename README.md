@@ -24,7 +24,9 @@
 -   **High Performance**: Uses **HTML5 Canvas** for rendering instead of heavy DOM elements, enabling 60 FPS playback.
 -   **Binary Protocol**: Frames are encoded into `Uint8Array` (binary) for efficient bandwidth usage.
 -   **Multiple Color Modes**: Supports everything from classic B&W to 16M color ultra-fidelity.
--   **Modern Aesthetic**: Premium dark-mode UI with interactive ripple dissolve effects.
+-   **Flexible Video Management**: Supports JSON playlists (per-video mode & volume), 
+      folder-based auto-queuing (filesystem order), single-file mode, and infinite loop 
+      playback — all controlled via CLI arguments.
 
 ## 🛠️ Architecture
 
