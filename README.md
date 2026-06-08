@@ -1,20 +1,19 @@
 # 🌌 ASCILINE Engine
 
-**ASCILINE** is a high-performance, cross-platform real-time ASCII video rendering engine. **Our core objective is to transform the web into a highly dynamic and interactive typographic canvas.** By moving away from traditional video players, ASCILINE streams visual data from a Python backend directly into the browser at **60 FPS** as raw, manipulable text.
+**ASCILINE** is a high-performance, cross-platform real-time ASCII video rendering engine. **Our core objective is to transform the web into a highly dynamic and interactive typographic canvas.** By mapping pixels to text-based representations, we unlock new possibilities for web media delivery.
 
 | Output | Details |
 | :--- | :--- |
-| <img width="413" height="233" alt="soruce giff" src="https://github.com/user-attachments/assets/ccc727c9-c697-49f2-85e1-6f8c366f2019" />
- | **Original Source**<br>Standard MP4 video file. |
-| <img src="https://github.com/user-attachments/assets/6bd7f5c0-81de-49fe-ba0d-9a8872ec8ae3" width="400" alt="ASCII Mode" /> | **ASCII Mode**<br>Showcases rendered using Mode 3 (32K Colors) from a 30 FPS source video. The engine naturally synchronizes up to 60+ FPS depending on the source material. |
-| <img src="https://github.com/user-attachments/assets/0d6e9d4c-662c-4e38-b451-70d9b142bc1d" width="400" alt="Pixel Mode" /> | **PIXEL Mode**<br>Showcases rendered using Mode 3 (32K Colors) combined with `--pixel`. Replaces characters with colored blocks for ultra-high performance. **At higher grid resolutions, The visual quality approaches standard 360p video streaming.** |
+| <img width="413" height="233" alt="soruce giff" src="https://github.com/user-attachments/assets/ccc727c9-c697-49f2-85e1-6f8c366f2019" /> | **Original Source**<br>Standard MP4 video file. |
+| <img src="https://github.com/user-attachments/assets/6bd7f5c0-81de-49fe-ba0d-9a8872ec8ae3" width="400" alt="ASCII Mode" /> | **ASCII Mode**<br>Showcases rendered using Mode 3 (32K Colors) from a 30fps source. |
+| <img src="https://github.com/user-attachments/assets/0d6e9d4c-662c-4e38-b451-70d9b142bc1d" width="400" alt="Pixel Mode" /> | **PIXEL Mode**<br>Showcases rendered using Mode 3 (32K Colors) combined with the `--pixel` flag for ultra-high fidelity. |
 
 ## 🎯 Strategic Vision & Core Capabilities
 
-1. **Pure Typographic Manipulation**: The visual stream is not a standard media file—it's raw HTML/Canvas text. This makes the impossible possible: you can apply real-time CSS filters (neon glows, text shadows) to a playing video, dynamically manipulate colors, or let users literally copy a moving visual element with their cursor.
-2. **Local AI & LLM Ready**: By reducing complex pixel streams into structured logical strings, ASCILINE acts as a perfect bridge for AI. Instead of feeding heavy computer vision models, lightweight text blocks can be fed directly to Local LLMs. Analyzing visual changes becomes as simple as taking a "diff" between two text strings.
-3. **Ultra-Low Bandwidth & IoT Compatibility**: Standard codecs (H.264/VP9) choke microcontrollers and weak networks. ASCILINE processes the heavy lifting once on the backend, streaming only a few kilobytes of String packets per second via WebSockets. It enables zero-latency live streams on satellite connections, embedded systems, and extreme low-bandwidth environments.
-4. **Bypassing Browser Constraints**: Modern browsers aggressively throttle autoplay videos, and ad-blockers restrict traditional media frames. To the browser, ASCILINE is simply "JavaScript updating text on a page." This circumvents traditional restrictions, allowing for immediate, unblockable visual streams.
+1. **Pure Typographic Manipulation**: The visual stream is not a standard media file—it's raw HTML/Canvas text. This makes the impossible possible: you can apply real-time CSS filters (neon glows, text shadows, animations) to video content.
+2. **Local AI & LLM Ready**: By reducing complex pixel streams into structured logical strings, ASCILINE acts as a perfect bridge for AI. Instead of feeding heavy computer vision models, lightweight LLMs can process semantic video summaries.
+3. **Ultra-Low Bandwidth & IoT Compatibility**: Standard codecs (H.264/VP9) choke microcontrollers and weak networks. ASCILINE processes the heavy lifting once on the backend, streaming only a few kilobytes per frame.
+4. **Bypassing Browser Constraints**: Modern browsers aggressively throttle autoplay videos, and ad-blockers restrict traditional media frames. To the browser, ASCILINE is simply "JavaScript updating a canvas"—completely invisible to media restrictions.
 
 ## 🚀 Technical Features
 
