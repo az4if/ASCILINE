@@ -24,6 +24,7 @@ from websockets.exceptions import ConnectionClosed
 
 # Import the existing engine (ascii_video_player2.py)
 from ascii_video_player2 import VideoDecoder, AsciiMapper
+from codec import encode_frame
 
 app = FastAPI()
 
@@ -224,6 +225,11 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     await websocket.accept()
 
+    # Opt-in adaptive codec (raw/zlib/delta). Legacy clients omit it and get
+    # the original uncompressed binary protocol, byte-for-byte unchanged.
+    adaptive = websocket.query_params.get("codec") == "adaptive"
+    tolerance = getattr(app.state, "tolerance", 0)  # lossy colour drift budget
+
     queue = getattr(app.state, "queue", [])
     loop  = getattr(app.state, "loop", False)
 
@@ -308,6 +314,7 @@ async def websocket_endpoint(websocket: WebSocket):
             import struct
             start_time = asyncio.get_event_loop().time()
             frame_index = 0
+            prev_frame = None  # previous framebuffer snapshot for delta coding
 
             # Pre-allocate send buffer WITH header space to avoid per-frame concat
             if pixel_mode:
@@ -333,13 +340,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         break
 
                     if pixel_mode:
-                        # ── ZERO-COPY PIXEL MODE ──
-                        # Send raw BGR bytes directly. No RGB conversion,
-                        # no dummy 0xDB char, no intermediate numpy copies.
-                        bgr_bytes = bgr_frame.tobytes()
-                        struct.pack_into(">I", pixel_send_buf, 0, frame_index)
-                        pixel_send_buf[4:] = bgr_bytes
-                        await websocket.send_bytes(bytes(pixel_send_buf))
+                        # ── PIXEL MODE: raw BGR (3 bytes/cell) ──
+                        if adaptive:
+                            msg, prev_frame = encode_frame(
+                                np.ascontiguousarray(bgr_frame),
+                                prev_frame, frame_index, tolerance=tolerance)
+                            await websocket.send_bytes(msg)
+                        else:
+                            # ── ZERO-COPY PIXEL MODE (legacy) ──
+                            struct.pack_into(">I", pixel_send_buf, 0, frame_index)
+                            pixel_send_buf[4:] = bgr_frame.tobytes()
+                            await websocket.send_bytes(bytes(pixel_send_buf))
                     else:
                         indices = np.floor_divide(gray_frame, max(1, 256 // mapper._n))
                         np.clip(indices, 0, mapper._n - 1, out=indices)
@@ -355,9 +366,15 @@ async def websocket_endpoint(websocket: WebSocket):
                                 rgb = (rgb >> qb) << qb
                             frame_buf[:, :, 0] = char_codes
                             frame_buf[:, :, 1:] = rgb
-                            struct.pack_into(">I", ascii_send_buf, 0, frame_index)
-                            ascii_send_buf[4:] = frame_buf.tobytes()
-                            await websocket.send_bytes(bytes(ascii_send_buf))
+                            if adaptive:
+                                msg, prev_frame = encode_frame(
+                                    frame_buf, prev_frame, frame_index,
+                                    tolerance=tolerance)
+                                await websocket.send_bytes(msg)
+                            else:
+                                struct.pack_into(">I", ascii_send_buf, 0, frame_index)
+                                ascii_send_buf[4:] = frame_buf.tobytes()
+                                await websocket.send_bytes(bytes(ascii_send_buf))
 
                     elapsed = asyncio.get_event_loop().time() - start_time
                     wait = (frame_index * frame_t) - elapsed
@@ -530,6 +547,12 @@ if __name__ == "__main__":
         help="Volume 0-5  (0=muted, 1=normal, 5=double)"
     )
     playback.add_argument("--loop", action="store_true", default=False, help="Loop the queue infinitely")
+    playback.add_argument(
+        "--quality",
+        choices=["lossless", "high", "balanced", "low"], default="lossless",
+        help="Adaptive-codec colour fidelity (lossless = bit-exact; lower = "
+             "smaller stream via lossy temporal delta). Chars always exact."
+    )
 
     # ── Server ──
     srv = parser.add_argument_group('\033[33mServer\033[0m')
@@ -553,6 +576,7 @@ if __name__ == "__main__":
     app.state.queue         = queue
     app.state.current_index = 0
     app.state.loop          = args.loop
+    app.state.tolerance     = {"lossless": 0, "high": 4, "balanced": 8, "low": 16}[args.quality]
     global_default_cols     = args.cols if args.cols is not None else (450 if args.pixel else 200)
     app.state.cols          = global_default_cols
     app.state.rows          = args.rows

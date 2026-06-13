@@ -34,6 +34,45 @@
 2.  **Frontend (Vanilla JS)**: Receives binary frames via WebSockets, manages a jitter buffer, and renders to a Canvas grid.
 3.  **Communication**: Optimized WebSocket protocol with a custom `INIT` handshake for dynamic resolution/FPS adjustment.
 
+## 🗜️ Adaptive Frame Codec (opt-in, backward compatible)
+
+The original binary protocol re-sends the full grid every frame. An opt-in
+adaptive codec picks the smallest of three encodings per frame and tags it in a
+1-byte header — **without changing the rendered output**:
+
+| tag | encoding | best for |
+| :-- | :------- | :------- |
+| `0` RAW | framebuffer as-is (legacy) | incompressible frames |
+| `1` ZLIB | `zlib(framebuffer)` | general motion |
+| `2` DELTA | only the cells that changed since the last frame | static / low-motion |
+
+Clients opt in with `/ws?codec=adaptive`; omit it and you get the **original
+protocol byte-for-byte**, so existing clients are unaffected. A keyframe is
+forced periodically so dropped packets / late joiners resync. The decoder
+(`codec.js`) is shared by the browser and the test suite, so the shipped path is
+the tested one.
+
+**Measured wire savings** (mode 5, 200×80 grid):
+
+| content | vs. legacy |
+| :------ | :--------- |
+| static screen / slideshow | **0.3%** (≈375×) |
+| pixel mode | 11.6% (≈8.6×) |
+| high-motion / full-frame change | 63% (never worse than legacy) |
+
+An optional `--quality {lossless,high,balanced,low}` enables lossy *temporal
+delta*: a colour cell is only re-sent once it drifts past a tolerance from what
+the viewer already sees (the character plane stays exact), cutting the hard
+cases a further ~15–30% at imperceptible quality. Default is `lossless`
+(bit-exact).
+
+> Verified two independent ways, both **bit-exact**: Python-encoded vectors
+> decoded by `codec.js` in Node (`experiments/gen_vectors.py` →
+> `experiments/check_vectors.js`), and a live `adaptive`-vs-`legacy` WebSocket
+> diff (`experiments/test_e2e.js`). Generate the test clips with
+> `experiments/make_test_clips.sh`. (A fuller mutation-test + Autobahn
+> conformance harness and CI workflow exist too — happy to add them if useful.)
+
 ## 📦 Installation
 
 ### 1. Clone the repository
