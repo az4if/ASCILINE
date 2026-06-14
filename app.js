@@ -44,7 +44,6 @@ let selectionBuffer = null;
 let lastRenderTime = 0;
 let frameCount = 0, currentFps = 0, lastFpsUpdate = 0;
 let streamStartTime = 0;
-let audioClockOffset = null;   // anchors the audio clock so it never jumps backward (issue #7)
 
 const CHAR_LUT = new Array(128);
 for (let i = 0; i < 128; i++) CHAR_LUT[i] = String.fromCharCode(i);
@@ -187,7 +186,6 @@ function connectWebSocket() {
                     streamStartTime = performance.now();
                     lastRenderTime = performance.now();
                     lastFpsUpdate = lastRenderTime;
-                    audioClockOffset = null;   // re-anchor for this stream
                     requestAnimationFrame(renderFrame);
                 };
 
@@ -271,25 +269,11 @@ function renderFrame(now) {
     requestAnimationFrame(renderFrame);
 
     // ── MASTER CLOCK LOGIC ──
-    // The audio track is the master clock, BUT it must never jump backward
-    // (issue #7, the cold-start freeze). On a cold load the <audio> element can
-    // start late: the wall-clock fallback has already advanced playback a second
-    // or two, and when audio finally begins, audioEl.currentTime is back near 0.
-    // Snapping the master clock back to ~0 makes every buffered frame read as
-    // "in the future", so renderFrame() returns forever and the stream freezes
-    // until audio catches up. The fix: the first time audio is genuinely playing,
-    // capture the offset between where the wall clock already is and the audio
-    // clock, and add it back — so the clock follows audio's *rate* without ever
-    // moving backward. (When audio starts promptly the offset is ~0.)
-    const wallClock = (now - streamStartTime) / 1000.0;
     let masterClock;
-    if (audioEl && audioEl.readyState >= 1 && !audioEl.paused && audioEl.currentTime > 0) {
-        if (audioClockOffset === null) {
-            audioClockOffset = Math.max(0, wallClock - audioEl.currentTime);
-        }
-        masterClock = audioEl.currentTime + audioClockOffset;
+    if (audioEl && audioEl.readyState >= 1 && !audioEl.paused) {
+        masterClock = audioEl.currentTime;
     } else {
-        masterClock = wallClock;
+        masterClock = (now - streamStartTime) / 1000.0;
     }
 
     if (frameBuffer.length === 0) return;
