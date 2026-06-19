@@ -149,6 +149,9 @@ video the first time you hover, in a single quick ffmpeg pass, and keeps it in
 memory so nothing is written to disk. If you already have your own sprite, point
 the `/scrub` route at it instead.
 
+Hover previews are on by default. If you would rather not build them at all, start
+the server with `--no-thumbnails` and the rest of the player keeps working.
+
 ### 4. Run directly in Terminal (Standalone)
 If you prefer to bypass the web interface, you can render the video directly inside an ANSI-supported terminal (zero-flicker, true color):
 ```bash

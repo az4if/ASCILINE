@@ -310,6 +310,9 @@ async def scrub_meta(v: int | None = None):
     loop) the first time it's asked for, then reuses it from memory."""
     from fastapi import Response
     import json as _json
+    # Thumbnails are on by default; --no-thumbnails turns the whole thing off.
+    if not getattr(app.state, "thumbnails", True):
+        return Response(content='{"available": false}', media_type="application/json")
     video_path = _scrub_video_path(v)
     if not video_path or not os.path.exists(video_path):
         return Response(content='{"available": false}', media_type="application/json")
@@ -757,6 +760,12 @@ if __name__ == "__main__":
         help="Adaptive-codec colour fidelity (lossless = bit-exact; lower = "
              "smaller stream via lossy temporal delta). Chars always exact."
     )
+    playback.add_argument(
+        "--no-thumbnails",
+        action="store_true", default=False,
+        help="Turn off the hover thumbnails on the seek bar (skips building the "
+             "preview sprite). The rest of the player still works."
+    )
 
     # ── Server ──
     srv = parser.add_argument_group('\033[33mServer\033[0m')
@@ -784,6 +793,7 @@ if __name__ == "__main__":
     app.state.loop          = args.loop
     app.state.tolerance     = {"lossless": 0, "high": 4, "balanced": 8, "low": 16}[args.quality]
     app.state.debug         = args.debug
+    app.state.thumbnails    = not args.no_thumbnails
     global_default_cols     = args.cols if args.cols is not None else (450 if args.pixel else 200)
     app.state.cols          = global_default_cols
     app.state.rows          = args.rows

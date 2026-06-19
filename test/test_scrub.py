@@ -78,6 +78,14 @@ class ScrubTests(unittest.TestCase):
         finally:
             ss.app.state.queue = [_entry(self.video)]
 
+    def test_thumbnails_can_be_disabled(self):
+        ss.app.state.thumbnails = False
+        try:
+            body = json.loads(asyncio.run(ss.scrub_meta(0)).body)
+            self.assertFalse(body["available"])
+        finally:
+            ss.app.state.thumbnails = True
+
     def test_sprite_404_before_it_is_built(self):
         from fastapi import HTTPException
         ss._scrub_cache.clear()
