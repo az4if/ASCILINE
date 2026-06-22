@@ -597,6 +597,31 @@ async def websocket_endpoint(websocket: WebSocket):
                             buf = bytes(ascii_send_buf)
                             return ('bytes', buf, pf, raw_sz, len(buf))
 
+            # ── BACKPRESSURE FRAME-DROP ──
+            # Cheaply advance the source by one effective frame WITHOUT decoding,
+            # processing, encoding, or sending it. Used when the client reports a
+            # growing backlog: we skip the frame instead of making the client pay
+            # the inflate+delta-patch cost for a frame it would only drop after.
+            # prev_frame is intentionally left untouched by the caller, so the next
+            # SENT frame is a correct delta across the gap (deltas are always
+            # relative to the last sent frame). Returns False at EOF.
+            def advance_one():
+                for _ in range(skip_n):
+                    if not decoder.grab():
+                        return False
+                return True
+
+            # Drop once the client's decoded-frame backlog exceeds this. The client
+            # render loop keeps a ~BUFFER_SIZE (4) jitter buffer, so 8 is one extra
+            # buffer of slack before we start shedding. MAX_CONSEC_DROPS guarantees
+            # liveness: we always send a real frame at least this often, so a stalled
+            # or non-reporting client can never be starved and a large delta gap is
+            # bounded.
+            BACKLOG_HIGH = 8
+            MAX_CONSEC_DROPS = max(1, int(round(effective_fps)))  # ~1s of frames
+            client_backlog = 0   # latest depth reported by the client (0 = unknown/healthy)
+            consec_drops = 0
+
             _loop = asyncio.get_event_loop()
 
             try:
@@ -615,10 +640,38 @@ async def websocket_endpoint(websocket: WebSocket):
                             frame_index = int(target_sec * effective_fps)
                             start_time = _loop.time() - (frame_index * frame_t)
                             bw_start_time = time.time()
+                            client_backlog = 0  # stale across a seek
+                            consec_drops = 0
+                        elif msg.get("type") == "buffer":
+                            # Client's current decoded-frame backlog (frameBuffer.length).
+                            try:
+                                client_backlog = max(0, int(msg.get("depth", 0)))
+                            except (TypeError, ValueError):
+                                client_backlog = 0
 
                     if is_paused:
                         await asyncio.sleep(0.1)
                         continue
+
+                    # ── BACKPRESSURE ──
+                    # If the client is behind, skip this frame instead of sending one
+                    # it will only decode-then-drop. Advancing the source keeps video
+                    # time-aligned with the audio/wall clock; prev_frame is held so the
+                    # next sent frame is a correct delta across the gap. MAX_CONSEC_DROPS
+                    # caps the gap and guarantees we never starve the client.
+                    if client_backlog > BACKLOG_HIGH and consec_drops < MAX_CONSEC_DROPS:
+                        advanced = await _loop.run_in_executor(None, advance_one)
+                        if not advanced:
+                            break
+                        client_backlog -= 1   # optimistic; corrected by next report
+                        consec_drops += 1
+                        frame_index += 1
+                        elapsed = _loop.time() - start_time
+                        wait = (frame_index * frame_t) - elapsed
+                        if wait > 0:
+                            await asyncio.sleep(wait)
+                        continue
+                    consec_drops = 0
 
                     # ALL CPU work in thread pool — event loop stays 100% free
                     result = await _loop.run_in_executor(

@@ -40,6 +40,7 @@ function formatTime(seconds) {
 // ── STATE ──
 let state = 'IDLE'; // IDLE | PLAYING | PAUSED
 let ws = null;
+let bufferReportTimer = null; // periodic backlog report to the server (backpressure)
 const frameBuffer = [];
 const BUFFER_SIZE = 4;
 let codecDecoder = null; // Adaptive codec decoder (codec.js)
@@ -237,6 +238,7 @@ function connectWebSocket() {
                     lastRenderTime = performance.now();
                     lastFpsUpdate = lastRenderTime;
                     requestAnimationFrame(renderFrame);
+                    startBufferReports();
                 };
 
                 if (audioEl) {
@@ -421,8 +423,27 @@ function renderFrame(now) {
 //  CLEANUP
 // ═══════════════════════════════════════
 
+// ── BACKPRESSURE REPORTING ──
+// Tell the server how many decoded frames are queued for render (frameBuffer
+// depth). When it grows the client is behind, and the server drops frames
+// server-side instead of making us decode (inflate + delta-patch) frames we
+// would only drop after. ~4 Hz is plenty: the server only needs a coarse signal.
+function startBufferReports() {
+    stopBufferReports();
+    bufferReportTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN && state === 'PLAYING') {
+            ws.send(JSON.stringify({ type: 'buffer', depth: frameBuffer.length }));
+        }
+    }, 250);
+}
+
+function stopBufferReports() {
+    if (bufferReportTimer) { clearInterval(bufferReportTimer); bufferReportTimer = null; }
+}
+
 function finishStream() {
     state = 'IDLE';
+    stopBufferReports();
     if (ws) { ws.onclose = null; ws.close(); ws = null; }
     if (audioEl) { audioEl.pause(); audioEl.src = ''; }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
