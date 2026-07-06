@@ -665,3 +665,137 @@ window.addEventListener('resize', () => {
     syncSize(canvas);
     syncSize(player);
 });
+
+// ═══════════════════════════════════════
+//  FILTER MENU (Contrast / Gamma / Brightness / Invert / Palette)
+// ═══════════════════════════════════════
+
+const filterMenu       = document.getElementById('filter-menu');
+const btnFilters       = document.getElementById('btn-filters');
+const filterClose      = document.getElementById('filter-close');
+const filterContrast   = document.getElementById('filter-contrast');
+const filterGamma      = document.getElementById('filter-gamma');
+const filterBrightness = document.getElementById('filter-brightness');
+const filterSharpness  = document.getElementById('filter-sharpness');
+const filterInvertBtn  = document.getElementById('filter-invert');
+const contrastVal      = document.getElementById('filter-contrast-val');
+const gammaVal         = document.getElementById('filter-gamma-val');
+const brightnessVal    = document.getElementById('filter-brightness-val');
+const sharpnessVal     = document.getElementById('filter-sharpness-val');
+const filterReset      = document.getElementById('filter-reset');
+const paletteRadios    = document.querySelectorAll('input[name="palette"]');
+
+let currentFilters = { contrast: 1.0, gamma: 1.0, brightness: 0, invert: false, sharpness: 0, palette: 'default' };
+let filterSendTimer = null;
+
+function toggleFilterMenu() {
+    if (filterMenu) filterMenu.classList.toggle('open');
+}
+
+if (btnFilters) btnFilters.addEventListener('click', (e) => { e.stopPropagation(); toggleFilterMenu(); });
+if (filterClose) filterClose.addEventListener('click', (e) => { e.stopPropagation(); toggleFilterMenu(); });
+
+// Prevent clicks inside the filter menu from toggling pause
+if (filterMenu) filterMenu.addEventListener('click', (e) => e.stopPropagation());
+
+// Debounced filter send — batches rapid slider drags into one WS message
+function sendFilters() {
+    if (filterSendTimer) clearTimeout(filterSendTimer);
+    filterSendTimer = setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type:       'filter',
+                contrast:   currentFilters.contrast,
+                gamma:      currentFilters.gamma,
+                brightness: currentFilters.brightness,
+                invert:     currentFilters.invert,
+                sharpness:  currentFilters.sharpness,
+                palette:    currentFilters.palette
+            }));
+        }
+        filterSendTimer = null;
+    }, 60);
+}
+
+if (filterContrast) {
+    filterContrast.addEventListener('input', () => {
+        currentFilters.contrast = parseFloat(filterContrast.value);
+        if (contrastVal) contrastVal.textContent = currentFilters.contrast.toFixed(2);
+        sendFilters();
+    });
+}
+
+if (filterGamma) {
+    filterGamma.addEventListener('input', () => {
+        currentFilters.gamma = parseFloat(filterGamma.value);
+        if (gammaVal) gammaVal.textContent = currentFilters.gamma.toFixed(2);
+        sendFilters();
+    });
+}
+
+if (filterBrightness) {
+    filterBrightness.addEventListener('input', () => {
+        currentFilters.brightness = parseInt(filterBrightness.value, 10);
+        if (brightnessVal) {
+            const v = currentFilters.brightness;
+            brightnessVal.textContent = (v > 0 ? '+' : '') + v;
+        }
+        sendFilters();
+    });
+}
+
+if (filterSharpness) {
+    filterSharpness.addEventListener('input', () => {
+        currentFilters.sharpness = parseInt(filterSharpness.value, 10);
+        if (sharpnessVal) sharpnessVal.textContent = currentFilters.sharpness;
+        sendFilters();
+    });
+}
+
+if (filterInvertBtn) {
+    filterInvertBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        currentFilters.invert = !currentFilters.invert;
+        filterInvertBtn.dataset.active = currentFilters.invert ? 'true' : 'false';
+        filterInvertBtn.textContent = currentFilters.invert ? 'ON' : 'OFF';
+        sendFilters();
+    });
+}
+
+paletteRadios.forEach(radio => {
+    radio.addEventListener('change', () => {
+        currentFilters.palette = radio.value;
+        sendFilters();
+    });
+});
+
+if (filterReset) {
+    filterReset.addEventListener('click', (e) => {
+        e.stopPropagation();
+        currentFilters = { contrast: 1.0, gamma: 1.0, brightness: 0, invert: false, sharpness: 0, palette: 'default' };
+        if (filterContrast)   filterContrast.value = 1.0;
+        if (filterGamma)      filterGamma.value = 1.0;
+        if (filterBrightness) filterBrightness.value = 0;
+        if (filterSharpness)  filterSharpness.value = 0;
+        if (contrastVal)      contrastVal.textContent = '1.00';
+        if (gammaVal)         gammaVal.textContent = '1.00';
+        if (brightnessVal)    brightnessVal.textContent = '0';
+        if (sharpnessVal)     sharpnessVal.textContent = '0';
+        if (filterInvertBtn) {
+            filterInvertBtn.dataset.active = 'false';
+            filterInvertBtn.textContent = 'OFF';
+        }
+        paletteRadios.forEach(r => { r.checked = (r.value === 'default'); });
+        sendFilters();
+    });
+}
+
+// Keyboard shortcut: 'F' to toggle filter menu
+document.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (state === 'PLAYING' || state === 'PAUSED') {
+            e.preventDefault();
+            toggleFilterMenu();
+        }
+    }
+});

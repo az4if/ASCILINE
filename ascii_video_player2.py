@@ -34,17 +34,31 @@ class VideoDecoder:
     Both undergo the same resize operation -> size consistency guaranteed.
     """
 
-    def __init__(self, path: str, cols: int, rows: int, skip_gray: bool = False) -> None:
+    def __init__(self, path, cols: int, rows: int, skip_gray: bool = False,
+                 mirror: bool = False, fallback_fps: float = 0) -> None:
+        """
+        :param path:         Video file path (str) or webcam device index (int).
+        :param mirror:       If True, flip each frame horizontally (webcam selfie view).
+        :param fallback_fps: FPS override when camera-reported FPS is unreliable.
+        """
+        self._is_webcam = isinstance(path, int)
         self._cap = cv2.VideoCapture(path)
         if not self._cap.isOpened():
-            raise FileNotFoundError(f"Could not open video file: {path!r}")
+            source = f"webcam {path}" if self._is_webcam else repr(path)
+            raise FileNotFoundError(f"Could not open video source: {source}")
 
-        self.fps         : float = self._cap.get(cv2.CAP_PROP_FPS) or 24.0
-        self.frame_count : int   = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        # Webcam: minimize internal buffer for low latency (cross-OS)
+        if self._is_webcam:
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        reported_fps = self._cap.get(cv2.CAP_PROP_FPS) or 0
+        self.fps         : float = fallback_fps if (fallback_fps > 0) else (reported_fps or 24.0)
+        self.frame_count : int   = 0 if self._is_webcam else int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.vid_w       : int   = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.vid_h       : int   = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self._size       : tuple = (cols, rows)
         self._skip_gray  : bool  = skip_gray
+        self._mirror     : bool  = mirror
 
     def __iter__(self):
         return self
@@ -57,6 +71,9 @@ class VideoDecoder:
         ok, frame = self._cap.read()
         if not ok:
             raise StopIteration
+
+        if self._mirror:
+            frame = cv2.flip(frame, 1)  # horizontal flip for selfie view
 
         small = cv2.resize(frame, self._size, interpolation=cv2.INTER_LINEAR)
         if self._skip_gray:
@@ -139,8 +156,8 @@ class AsciiMapper:
         H, W = gray.shape
 
         # ── Step 1: Pixel intensity -> character index ──────────────────
-        indices = np.floor_divide(gray, max(1, 256 // self._n))
-        np.clip(indices, 0, self._n - 1, out=indices)
+        indices = (gray.astype(np.uint16) * (self._n - 1)) // 255
+        np.clip(indices, 0, self._n - 1, out=indices) # Defensive clip
         char_matrix = self._lut[indices]    # shape=(H,W), dtype='U1'
 
         # ── Step 2: Color quantization ────────────────────────────────────
@@ -208,22 +225,26 @@ class TerminalRenderer:
 
     def __init__(
         self,
-        path         : str,
+        path,
         palette      : list[str] | None = None,
         quantize_bits: int = 0,
         cols         : int = 0,
+        fallback_fps : float = 0,
+        mirror       : bool = False,
     ) -> None:
         """
-        :param path:          Path to video file
+        :param path:          Path to video file or webcam index
         :param palette:       Custom character palette (None -> 93 levels)
         :param quantize_bits: Color quantization (0=full quality, 2=fast)
         :param cols:          Fixed columns. If 0, auto-fit to terminal.
+        :param fallback_fps:  Fallback FPS if source FPS is unknown.
+        :param mirror:        If True, flip each frame horizontally (for webcams).
         """
         # ── Video metadata ────────────────────────────────────────────
-        _probe = VideoDecoder(path, 2, 2)
-        vid_w, vid_h = _probe.vid_w, _probe.vid_h
-        src_fps      = _probe.fps
-        _probe.release()
+        # Initialize decoder once with dummy dimensions to get source resolution
+        self._decoder = VideoDecoder(path, 2, 2, mirror=mirror, fallback_fps=fallback_fps)
+        vid_w, vid_h = self._decoder.vid_w, self._decoder.vid_h
+        src_fps      = self._decoder.fps
 
         # ── Terminal dimensions ────────────────────────────────────────────
         term    = shutil.get_terminal_size(fallback=(220, 50))
@@ -271,9 +292,9 @@ class TerminalRenderer:
         )
         time.sleep(2.0)
 
-        self._decoder       = VideoDecoder(path, cols, rows)
+        self._decoder._size = (cols, rows)  # update target size after calculation
         self._mapper        = AsciiMapper(palette, quantize_bits)
-        self._fps           = self._decoder.fps
+        self._fps           = src_fps
         self._frame_t       = 1.0 / self._fps
 
     def play(self) -> None:
@@ -320,7 +341,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="True Color ANSI ASCII video player — zero flicker"
     )
-    parser.add_argument("video",
+    parser.add_argument("video", nargs="?", default=None,
         help="Path to video file (MP4, AVI, MKV ...)")
     parser.add_argument("--palette", default=None,
         help="Custom character palette, space-separated")
@@ -328,16 +349,33 @@ if __name__ == "__main__":
         help="Color quality: 0=max quality, 3=max speed (default: 0)")
     parser.add_argument("-c", "--cols", type=int, default=0,
         help="Fixed grid width. If 0, auto-fits to terminal (default: 0)")
+    parser.add_argument("--webcam", action="store_true", default=False,
+        help="Use webcam instead of a video file")
+    parser.add_argument("--webcam-device", type=int, default=0,
+        help="Webcam device index (default: 0)")
+    parser.add_argument("--webcam-fps", type=int, default=30,
+        help="Target webcam FPS (default: 30)")
+    parser.add_argument("--no-mirror", action="store_true", default=False,
+        help="Disable mirror (horizontal flip) in webcam mode")
     args = parser.parse_args()
+
+    if not args.webcam and args.video is None:
+        parser.error("a video file is required (or use --webcam)")
 
     custom_palette = args.palette.split() if args.palette else None
 
+    # Determine video source: webcam device index or file path
+    video_source = args.webcam_device if args.webcam else args.video
+    mirror = args.webcam and not args.no_mirror
+
     try:
         renderer = TerminalRenderer(
-            path          = args.video,
+            path          = video_source,
             palette       = custom_palette,
             quantize_bits = args.quality,
             cols          = args.cols,
+            fallback_fps  = args.webcam_fps if args.webcam else 0,
+            mirror        = mirror,
         )
         renderer.play()
     except FileNotFoundError as e:
