@@ -96,7 +96,7 @@ def compile_video(args):
     print(f"[Compiler] Dimensions: {cols}x{rows} | Mode: {render_mode} | Pixel: {pixel_mode} | FPS: {effective_fps:.1f}")
 
     char_byte_lut = np.array([ord(c) for c in mapper._lut], dtype=np.uint8)
-    qb = {5: 0, 4: 2, 3: 3, 2: 5}.get(render_mode, 0)
+    qb = {6: 0, 5: 2, 4: 3, 3: 5, 2: 6}.get(render_mode, 0)
     
     frame_buf = np.empty((rows, cols, 4), dtype=np.uint8) if render_mode > 1 else None
 
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     parser.add_argument("video", help="Path to input video")
     parser.add_argument("--cols", type=int, default=300, help="Grid columns (default 300)")
     parser.add_argument("--rows", type=int, default=0, help="Grid rows (0 = auto)")
-    parser.add_argument("--mode", type=int, default=5, choices=[1, 2, 3, 4, 5], help="Render mode")
+    parser.add_argument("--mode", type=int, default=6, choices=[1, 2, 3, 4, 5, 6], help="Render mode: 1=B&W  2=64c  3=512c  4=32Kc  5=262Kc  6=16M Ultra")
     parser.add_argument("--pixel", action="store_true", help="Pixel mode (no characters)")
     parser.add_argument("--tolerance", type=int, default=0, help="Color drift tolerance (0=lossless)")
     parser.add_argument("--hard", action="store_true", help="Use maximum zlib compression (level 9) instead of default (level 3). Slower but smaller file.")
