@@ -157,3 +157,110 @@ def encode_frame(frame: np.ndarray, prev: np.ndarray | None, frame_index: int,
     msg = struct.pack(">IB", frame_index, tag) + payload
     # If we sent a full frame, the client shows the TRUE frame, not the lossy one.
     return msg, (shown.copy() if shown is frame else shown)
+
+
+# ===== Opt-in lossy DCT profile (tag 4, pixel mode). Additive: encode_frame above is untouched. =====
+# ASCILINE codec.py PROFILE addition (tag 4, opt-in lossy DCT profile, pixel mode).
+# Ports the verified codec2 algorithm into ASCILINE conventions. Encoder side.
+import math
+
+TAG_PROFILE = 4
+KEY = 48
+R_SEARCH = 3
+# Deterministic integer DCT basis (round(F*64)) and standard zigzag, hardcoded to
+# guarantee bit-exact match with codec.js (no per-clip tables transmitted).
+MI = np.array([23,23,23,23,23,23,23,23,31,27,18,6,-6,-18,-27,-31,30,12,-12,-30,-30,-12,12,30,
+27,-6,-31,-18,18,31,6,-27,23,-23,-23,23,23,-23,-23,23,18,-31,6,27,-27,-6,31,-18,
+12,-30,30,-12,-12,30,-30,12,6,-18,27,-31,31,-27,18,-6],np.int64).reshape(8,8)
+MIT = MI.T.copy()
+ZZ = np.array([0,1,8,16,9,2,3,10,17,24,32,25,18,11,4,5,12,19,26,33,40,48,41,34,27,20,13,6,7,14,
+21,28,35,42,49,56,57,50,43,36,29,22,15,23,30,37,44,51,58,59,52,45,38,31,39,46,53,60,61,54,47,55,62,63],np.int64)
+QL_BASE=np.array([16,11,10,16,24,40,51,61,12,12,14,19,26,58,60,55,14,13,16,24,40,57,69,56,14,17,22,29,51,87,80,62,
+18,22,37,56,68,109,103,77,24,35,55,64,81,104,113,92,49,64,78,87,103,121,120,101,72,92,95,98,112,100,103,99],np.float64).reshape(8,8)
+QC_BASE=np.array([17,18,24,47,99,99,99,99,18,21,26,66,99,99,99,99,24,26,56,99,99,99,99,99,47,66,99,99,99,99,99,99,
+99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99],np.float64).reshape(8,8)
+_F=np.array([[ (math.sqrt(1.0/8) if k==0 else math.sqrt(2.0/8))*math.cos((2*n+1)*k*math.pi/16) for n in range(8)] for k in range(8)])
+
+def qtables(QF):
+    S=5000.0/QF if QF<50 else 200.0-2*QF
+    def scl(m): return np.clip(np.floor((m*S+50)/100),1,255).astype(np.int64)
+    return scl(QL_BASE), scl(QC_BASE)
+
+def _idct_int(C): return (MIT@C@MI+2048)//4096
+
+def _sub(x,H,W): return np.clip(x.reshape(H//2,2,W//2,2).mean(axis=(1,3)),0,255).astype(np.uint8)
+
+def yuv_to_bgr(Y,Cb,Cr):  # planes uint8 -> BGR bytes, integer BT.601 full-range (matches codec.js)
+    H,W=Y.shape
+    cb=np.repeat(np.repeat(Cb.astype(np.int32),2,0),2,1)-128
+    cr=np.repeat(np.repeat(Cr.astype(np.int32),2,0),2,1)-128
+    y=Y.astype(np.int32)
+    R=y+((359*cr+128)>>8); G=y-((88*cb+183*cr+128)>>8); B=y+((454*cb+128)>>8)
+    return np.clip(np.stack([B,G,R],2),0,255).astype(np.uint8).tobytes()
+
+def _enc_plane(cur,prev,ftype,use_mv,qm,DZ,SKIP_T):
+    ph,pw=cur.shape; nbx=pw//8; nby=ph//8; nb=nbx*nby
+    recon=np.empty_like(cur); skip=np.zeros(nb,dtype=bool); blob=bytearray(); bi=0; dcPred=0
+    if ftype==1 and use_mv:
+        curi=cur.astype(np.int16); pad=np.pad(prev,R_SEARCH,mode='edge').astype(np.int16)
+        best=np.abs(curi-prev.astype(np.int16)).reshape(nby,8,nbx,8).sum(axis=(1,3)).astype(np.int64)
+        mvy=np.zeros((nby,nbx),np.int64); mvx=np.zeros((nby,nbx),np.int64)
+        for dy in range(-R_SEARCH,R_SEARCH+1):
+            for dx in range(-R_SEARCH,R_SEARCH+1):
+                if dx==0 and dy==0: continue
+                sh=pad[R_SEARCH+dy:R_SEARCH+dy+ph,R_SEARCH+dx:R_SEARCH+dx+pw]
+                sad=np.abs(curi-sh).reshape(nby,8,nbx,8).sum(axis=(1,3))
+                m=sad<best; best=np.where(m,sad,best); mvx=np.where(m,dx,mvx); mvy=np.where(m,dy,mvy)
+        padu=np.pad(prev,R_SEARCH,mode='edge')
+    for by in range(nby):
+        for bx in range(nbx):
+            blk=cur[by*8:by*8+8,bx*8:bx*8+8].astype(np.float64); dx=dy=0
+            if ftype==0: pred=np.full((8,8),128.0)
+            elif use_mv:
+                dy=int(mvy[by,bx]); dx=int(mvx[by,bx])
+                pred=padu[R_SEARCH+by*8+dy:R_SEARCH+by*8+dy+8,R_SEARCH+bx*8+dx:R_SEARCH+bx*8+dx+8].astype(np.float64)
+            else: pred=prev[by*8:by*8+8,bx*8:bx*8+8].astype(np.float64)
+            _t=(_F@(blk-pred)@_F.T)/qm; Cq=np.round(_t).astype(np.int64)
+            if DZ>0.5: Cq[np.abs(_t)<DZ]=0
+            _sk=False
+            if ftype==1 and dx==0 and dy==0:
+                if not Cq.any(): _sk=True
+                elif SKIP_T>0 and float(np.sum((blk-pred)**2))<SKIP_T: _sk=True
+            if _sk:
+                skip[bi]=True; recon[by*8:by*8+8,bx*8:bx*8+8]=prev[by*8:by*8+8,bx*8:bx*8+8]
+            else:
+                recon[by*8:by*8+8,bx*8:bx*8+8]=np.clip(pred.astype(np.int64)+_idct_int(Cq*qm),0,255).astype(np.uint8)
+                if ftype==1 and use_mv: blob+=struct.pack('bb',dx,dy)
+                zz=Cq.reshape(-1)[ZZ].astype(np.int64).copy()
+                _dc=int(zz[0]); zz[0]=_dc-dcPred; dcPred=_dc
+                pairs=bytearray(); run=0
+                for v in zz:
+                    if v==0: run+=1
+                    else: pairs+=struct.pack('<Bh',run,int(v)); run=0
+                blob+=bytes([len(pairs)//3])+bytes(pairs)
+            bi+=1
+    head=bytearray()
+    if ftype==1: head+=np.packbits(skip).tobytes()
+    return bytes(head)+bytes(blob),recon
+
+class ProfileEncoder:
+    def __init__(self, W, H, QF=70, DZ=0.75, SKIP_T=256, level=6):
+        self.W,self.H,self.QF,self.DZ,self.SKIP_T,self.level=W,H,QF,DZ,SKIP_T,level
+        assert W%16==0 and H%16==0, "profile requires cols and rows multiples of 16 (compiler pads)"
+        self.QL,self.QC=qtables(QF); self.prev=None; self.n=0
+    def encode(self, frame_bgr):  # (H,W,3) uint8 BGR -> (msg, shown_bgr bytes)
+        f=frame_bgr.astype(np.float32); B=f[:,:,0];G=f[:,:,1];Rr=f[:,:,2]
+        Y=np.clip(0.299*Rr+0.587*G+0.114*B,0,255).astype(np.uint8)
+        Cb=_sub(128-0.168736*Rr-0.331264*G+0.5*B,self.H,self.W)
+        Cr=_sub(128+0.5*Rr-0.418688*G-0.081312*B,self.H,self.W)
+        cur=[Y,Cb,Cr]; ftype=0 if (self.prev is None or self.n%KEY==0) else 1
+        payload=bytearray([ftype])
+        if ftype==0: payload+=bytes([self.QF])+struct.pack(">HH",self.W,self.H)  # keyframe self-describes
+        recons=[]
+        for pi in range(3):
+            qm=self.QL if pi==0 else self.QC
+            pl,rec=_enc_plane(cur[pi], None if ftype==0 else self.prev[pi], ftype, pi==0, qm, self.DZ, self.SKIP_T)
+            payload+=pl; recons.append(rec)
+        z=zlib.compress(bytes(payload),self.level); msg=struct.pack(">IB",self.n,TAG_PROFILE)+z
+        self.prev=recons; self.n+=1
+        return msg, yuv_to_bgr(recons[0],recons[1],recons[2])
