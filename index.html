@@ -55,9 +55,11 @@
                     <div id="filter-menu" class="filter-menu">
                         <div class="filter-menu-inner">
                             <div class="filter-header">
-                                <span>╔══ FILTERS ══╗</span>
+                                <span>[ SETTINGS ]</span>
                                 <button id="filter-close" class="filter-close-btn">✕</button>
                             </div>
+
+                            <div class="filter-divider">IMAGE FILTERS</div>
                             <div class="filter-row">
                                 <label class="filter-label" for="filter-contrast">CONTRAST</label>
                                 <input id="filter-contrast" type="range" min="0.1" max="3.0" step="0.05" value="1.0" class="filter-slider">
@@ -82,16 +84,29 @@
                                 <label class="filter-label">INVERT</label>
                                 <button id="filter-invert" class="filter-toggle-btn" data-active="false" title="Invert all brightness values">OFF</button>
                             </div>
-                            <div class="filter-divider">── PALETTE ──</div>
+                            
+                            <div class="filter-divider">RENDER ENGINE</div>
+                            <div class="filter-row">
+                                <label class="filter-label">PIXEL MODE</label>
+                                <button id="filter-pixel" class="filter-toggle-btn" data-active="false" title="Switch to pixel mode (Soft reload)">OFF</button>
+                            </div>
+
+                            <div class="filter-divider">ASCII PALETTE</div>
                             <div class="filter-palette-group">
                                 <label class="filter-palette-option">
-                                    <input type="radio" name="palette" value="default" checked> DEFAULT <span class="palette-preview"> `.-':+!rc*z@</span>
+                                    <input type="radio" name="palette" value="default" checked>
+                                    <span class="palette-radio-custom"></span>
+                                    DEFAULT <span class="palette-preview"> `.-':+!rc*z@</span>
                                 </label>
                                 <label class="filter-palette-option">
-                                    <input type="radio" name="palette" value="flat"> FLAT/ANIME <span class="palette-preview"> .:-=+*#%@</span>
+                                    <input type="radio" name="palette" value="flat">
+                                    <span class="palette-radio-custom"></span>
+                                    FLAT/ANIME <span class="palette-preview"> .:-=+*#%@</span>
                                 </label>
                                 <label class="filter-palette-option">
-                                    <input type="radio" name="palette" value="block"> BLOCK <span class="palette-preview"> .+o#@</span>
+                                    <input type="radio" name="palette" value="block">
+                                    <span class="palette-radio-custom"></span>
+                                    BLOCK <span class="palette-preview"> .+o#@</span>
                                 </label>
                             </div>
                             <button id="filter-reset" class="filter-reset-btn">[ RESET ]</button>
@@ -102,7 +117,7 @@
                 <!-- Player Controls Bar -->
                 <div class="player-controls">
                     <button id="play-pause-btn" class="ctrl-btn" title="Play / Pause (Space)">❚❚</button>
-                    <button id="btn-back" class="ctrl-btn" title="Back 10s">«10</button>
+                    <button id="btn-back" class="ctrl-btn" title="Back 10s (Left Arrow)">«10</button>
                     <span id="time-current" class="ctrl-time">00:00</span>
                     <div class="seek-wrap">
                         <div class="seek-track"></div>
@@ -114,12 +129,12 @@
                         </div>
                     </div>
                     <span id="time-total" class="ctrl-time">00:00</span>
-                    <button id="btn-fwd" class="ctrl-btn" title="Forward 10s">10»</button>
+                    <button id="btn-fwd" class="ctrl-btn" title="Forward 10s (Right Arrow)">10»</button>
                     <div class="ctrl-group">
                         <span class="ctrl-icon">VOL_</span>
                         <input id="volume-slider" type="range" min="0" max="1" step="0.05" value="1">
                     </div>
-                    <button id="btn-filters" class="ctrl-btn" title="Filters / Settings">⚙FX</button>
+                    <button id="btn-filters" class="ctrl-btn" title="Settings">⚙</button>
                 </div>
 
                 <!-- Hidden Audio Element -->

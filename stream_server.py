@@ -125,6 +125,15 @@ async def prefetch_worker():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Suppress ConnectionResetError tracebacks in Windows asyncio (e.g. from seek/audio aborts)
+    loop = asyncio.get_running_loop()
+    def handle_exception(loop, context):
+        exc = context.get("exception")
+        if isinstance(exc, ConnectionResetError):
+            return
+        loop.default_exception_handler(context)
+    loop.set_exception_handler(handle_exception)
+
     task = asyncio.create_task(prefetch_worker())
     yield
     task.cancel()
@@ -251,8 +260,7 @@ def build_queue(args) -> list[dict]:
     """
     if args.webcam:
         print(f"[WEBCAM] Device: {args.webcam_device} | Target FPS: {args.webcam_fps}")
-        default_cols = args.cols if args.cols is not None else (450 if args.pixel else 200)
-        return [{
+        item = {
             "video": args.webcam_device,
             "is_webcam": True,
             "mirror": not args.no_mirror,
@@ -260,9 +268,12 @@ def build_queue(args) -> list[dict]:
             "mode": args.mode,
             "vol": args.vol,
             "pixel": args.pixel,
-            "cols": default_cols,
             "rows": args.rows
-        }]
+        }
+        if args.cols is not None:
+            item["cols_override"] = args.cols
+        return [item]
+        
     if args.playlist:
         print(f"[PLAYLIST] Loading: {args.playlist}")
         items = load_playlist(args.playlist)
@@ -271,28 +282,28 @@ def build_queue(args) -> list[dict]:
             item.setdefault("mode", args.mode)
             item.setdefault("vol",  args.vol)
             item.setdefault("pixel", args.pixel)
-            
-            is_pixel = item.get("pixel", False)
-            default_cols = args.cols if args.cols is not None else (450 if is_pixel else 200)
-            item.setdefault("cols", default_cols)
             item.setdefault("rows", args.rows)
+            if args.cols is not None:
+                item["cols_override"] = args.cols
+            elif "cols" in item:
+                item["cols_override"] = item.pop("cols") # Move it to cols_override
         return items
 
     if args.folder:
         print(f"[FOLDER] Scanning: {args.folder}")
         items = load_folder(args.folder, args.mode, args.vol)
-        default_cols = args.cols if args.cols is not None else (450 if args.pixel else 200)
         for item in items:
             item["pixel"] = args.pixel
-            item["cols"] = default_cols
             item["rows"] = args.rows
+            if args.cols is not None:
+                item["cols_override"] = args.cols
         return items
 
     # Single positional argument: a local file/path, or a URL.
     # A URL may be a playlist/channel → expand it into one entry per video.
-    default_cols = args.cols if args.cols is not None else (450 if args.pixel else 200)
-    base = {"mode": args.mode, "vol": args.vol, "pixel": args.pixel,
-            "cols": default_cols, "rows": args.rows}
+    base = {"mode": args.mode, "vol": args.vol, "pixel": args.pixel, "rows": args.rows}
+    if args.cols is not None:
+        base["cols_override"] = args.cols
 
     if ytdl.is_url(args.video):
         urls = ytdl.expand_playlist(args.video)
@@ -580,7 +591,9 @@ async def websocket_endpoint(websocket: WebSocket):
             pixel_mode = entry.get("pixel", False)
             if render_mode == 1: #extra security layer for mod-1 in json (its fixes json override mechanism problem )
                 pixel_mode = False
-            cols       = entry.get("cols", 200)
+            
+            cols_override = entry.get("cols_override")
+            cols = cols_override if cols_override is not None else (450 if pixel_mode else 200)
             rows_cfg   = entry.get("rows", 0)
 
             # IMPORTANT: Update current_index BEFORE sending INIT so that
@@ -655,7 +668,7 @@ async def websocket_endpoint(websocket: WebSocket):
             frame_t = 1.0 / effective_fps
 
             duration = decoder.frame_count / decoder.fps if decoder.fps > 0 else 0
-            await websocket.send_text(f"INIT:{effective_fps}:{render_mode}:{cols}:{rows}:{int(pixel_mode)}:{queue_index}:{duration:.3f}")
+            await websocket.send_text(f"INIT:{effective_fps}:{render_mode}:{cols}:{rows}:{int(pixel_mode)}:{queue_index}:{duration:.3f}:0:{int(is_webcam)}")
             if skip_n > 1:
                 print(f"[FPS CAP] {source_fps} FPS → {effective_fps} FPS (skip every {skip_n} frames)")
 
@@ -792,7 +805,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 bw_start_time = time.time()
                         elif msg.get("type") == "seek":
                             target_sec = float(msg.get("time", 0))
-                            decoder.seek(target_sec)
+                            await _loop.run_in_executor(None, decoder.seek, target_sec)
                             prev_frame = None
                             frame_index = int(target_sec * effective_fps)
                             start_time = _loop.time() - (frame_index * frame_t)
@@ -811,6 +824,38 @@ async def websocket_endpoint(websocket: WebSocket):
                             except (TypeError, ValueError):
                                 client_backlog = 0
                                 consec_high_reports = 0
+                        elif msg.get("type") == "reinit":
+                            # Soft reload: Toggle pixel mode and send new INIT
+                            pixel_mode = bool(msg.get("pixel", pixel_mode))
+                            
+                            cols_override = entry.get("cols_override")
+                            cols = cols_override if cols_override is not None else (450 if pixel_mode else 200)
+                            
+                            if rows_cfg == 0:
+                                cols, rows = calc_auto_dimensions(cols, vid_w, vid_h, pixel_mode)
+                                print(f"[REINIT] {vid_w}x{vid_h} → grid {cols}x{rows}")
+                            else:
+                                rows = rows_cfg
+                            
+                            decoder._size = (cols, rows)
+                            decoder._skip_gray = pixel_mode
+                            if render_mode > 1:
+                                frame_buf = np.empty((rows, cols, 4), dtype=np.uint8)
+                            if pixel_mode:
+                                pixel_send_buf = bytearray(4 + rows * cols * 3)
+                            
+                            duration = decoder.frame_count / decoder.fps if decoder.fps > 0 else 0
+                            target_sec = float(msg.get("time", 0))
+                            await websocket.send_text(f"INIT:{effective_fps}:{render_mode}:{cols}:{rows}:{int(pixel_mode)}:{queue_index}:{duration:.3f}:{target_sec}:{int(is_webcam)}")
+                            
+                            await _loop.run_in_executor(None, decoder.seek, target_sec)
+                            prev_frame = None
+                            frame_index = int(target_sec * effective_fps)
+                            start_time = _loop.time() - (frame_index * frame_t)
+                            bw_start_time = time.time()
+                            client_backlog = 0
+                            consec_high_reports = 0
+                            consec_drops = 0
                         elif msg.get("type") == "filter":
                             # ── RUNTIME FILTER UPDATE ──
                             # Rebuild the mapper / LUT only when values actually change.
@@ -1015,7 +1060,8 @@ def print_status():
     if queue and idx < len(queue):
         entry = queue[idx]
         px = ' \033[35m[PIXEL]\033[0m' if entry.get('pixel') else ''
-        cols = entry.get('cols', cols)
+        cols_override = entry.get('cols_override')
+        cols = cols_override if cols_override is not None else (450 if entry.get('pixel') else 200)
         rows = entry.get('rows', rows)
         print(f" \033[32m▶\033[0m \033[1mVideo\033[0m      : \033[36m{entry['video']}\033[0m")
         print(f" \033[32m▶\033[0m \033[1mSettings\033[0m   : mode={entry['mode']}{px} vol={entry['vol']}")
@@ -1198,14 +1244,19 @@ if __name__ == "__main__":
     # Force the OS to load the first video into RAM cache before any client connects,
     # eliminating the initial multi-second startup lag (cold cache).
     if queue:
-        try:
-            print(" \033[90m▶ Warming up cache for first video...\033[0m", end="", flush=True)
-            warm_decoder = VideoDecoder(queue[0]["video"], cols=2, rows=2)
-            warm_decoder.grab()
-            warm_decoder.release()
-            print("\r\033[K", end="")
-        except Exception as e:
-            print(f"\r\033[K \033[33m▶ Warmup failed (non-fatal): {e}\033[0m")
+        first_vid = queue[0]["video"]
+        is_webcam = queue[0].get("is_webcam", False)
+        if not is_webcam and not ytdl.is_url(first_vid):
+            try:
+                print(" \033[90m▶ Warming up cache for first video...\033[0m", end="", flush=True)
+                warm_decoder = VideoDecoder(first_vid, cols=2, rows=2)
+                warm_decoder.grab()
+                warm_decoder.release()
+                print(" \033[32mDONE\033[0m")
+            except Exception as e:
+                print(f"\r\033[K \033[33m▶ Warmup failed (non-fatal): {e}\033[0m")
+        elif ytdl.is_url(first_vid):
+            print(" \033[90m▶ Warmup skipped: yt-dlp source (downloads on connect)\033[0m")
 
     # ── Startup Banner ──
     print(ASCII_LOGO)

@@ -71,6 +71,7 @@ let selectionBuffer = null;
 let lastRenderTime = 0;
 let frameCount = 0, currentFps = 0, lastFpsUpdate = 0;
 let streamStartTime = 0;
+let streamEpoch = 0; // Incremented on every seek/reinit to cancel stale async audio loads
 let lastUiUpdateTime = 0;
 let lastFormattedTime = "";
 
@@ -161,14 +162,14 @@ function buildCanvas(cols, rows) {
 const beginRendering = () => {
     if (readyToRender) return;
     readyToRender = true;
-    streamStartTime = performance.now();
+    streamStartTime = performance.now() - (audioOffset * 1000.0);
     lastRenderTime = performance.now();
     lastFpsUpdate = lastRenderTime;
     requestAnimationFrame(renderFrame);
     startBufferReports();
 };
 
-const triggerPlaybackStart = () => {
+const triggerPlaybackStart = (epochToMatch) => {
     if (readyToRender || state !== 'PLAYING') return;
     if (audioEl) {
         // The very first video frame has arrived and is ready.
@@ -178,8 +179,14 @@ const triggerPlaybackStart = () => {
         if (audioEl.readyState >= 3) {
             beginRendering();
         } else {
-            audioEl.addEventListener('playing', beginRendering, { once: true });
-            setTimeout(() => { if (!readyToRender) beginRendering(); }, 500);
+            audioEl.addEventListener('playing', () => {
+                if (epochToMatch !== streamEpoch) return;
+                beginRendering();
+            }, { once: true });
+            setTimeout(() => { 
+                if (epochToMatch !== streamEpoch) return;
+                if (!readyToRender) beginRendering(); 
+            }, 500);
         }
     } else {
         beginRendering();
@@ -227,6 +234,8 @@ function connectWebSocket() {
                 pixelMode = (p.length > 5 && parseInt(p[5]) === 1);
                 const currentQueueIndex = (p.length > 6) ? parseInt(p[6]) : null;
                 duration = (p.length > 7) ? parseFloat(p[7]) : 0;
+                const startOffset = (p.length > 8) ? parseFloat(p[8]) : 0;
+                const isWebcam = (p.length > 9 && parseInt(p[9]) === 1);
                 currentQueueIdx = currentQueueIndex !== null ? currentQueueIndex : 0;
                 
                 if (seekBar) {
@@ -236,8 +245,28 @@ function connectWebSocket() {
                 if (timeTotal) timeTotal.textContent = formatTime(duration);
                 if (timeCurrent) timeCurrent.textContent = "00:00";
                 if (seekPlayed) seekPlayed.style.transform = 'scaleX(0)';
+                
+                if (typeof filterPixelBtn !== 'undefined' && filterPixelBtn) {
+                    filterPixelBtn.dataset.active = pixelMode ? 'true' : 'false';
+                    filterPixelBtn.textContent = pixelMode ? 'ON' : 'OFF';
+                    
+                    if (isWebcam) {
+                        filterPixelBtn.disabled = true;
+                        filterPixelBtn.style.opacity = '0.5';
+                        filterPixelBtn.style.cursor = 'not-allowed';
+                        filterPixelBtn.title = 'Pixel mode toggle is disabled during live webcam feed';
+                    } else {
+                        filterPixelBtn.disabled = false;
+                        filterPixelBtn.style.opacity = '1';
+                        filterPixelBtn.style.cursor = 'pointer';
+                        filterPixelBtn.title = '';
+                    }
+                }
 
-                audioOffset = 0;
+                audioOffset = startOffset;
+                frameBuffer.length = 0;
+                framesInFlight = 0;
+                streamEpoch++; // Invalidate any pending audio loads
                 scrubMeta = null; // reset so new video gets fresh thumbnails
                 // Lazy-load hover thumbnails: only fetch on first hover
                 const qIdx = currentQueueIdx;
@@ -268,15 +297,17 @@ function connectWebSocket() {
                 // buffer in one go — visible as a sudden freeze on heavy footage.
                 // The decodeQueue above already prevents delta/keyframe races, so
                 // restoring the gate does NOT bring back the old startup stutter.
+                const wasPaused = (state === 'PAUSED');
                 readyToRender = false;
-                state = 'PLAYING';
+                if (!wasPaused) state = 'PLAYING';
 
 
 
                     if (audioEl) {
                         audioEl.pause();
-                        const qs = currentQueueIndex !== null ? `?v=${currentQueueIndex}&` : '?';
-                        audioEl.src = `/audio${qs}t=${Date.now()}`;
+                        const qs = currentQueueIndex !== null ? `v=${currentQueueIndex}&` : '';
+                        const st = startOffset > 0 ? `start=${startOffset}&` : '';
+                        audioEl.src = `/audio?${qs}${st}t=${Date.now()}`;
                         audioEl.volume = volumeSlider ? volumeSlider.value : 1.0;
                         audioEl.load();
                         // VIDEO GATE: Do not play audio or start rendering yet!
@@ -295,7 +326,7 @@ function connectWebSocket() {
             const frameTime = frameIndex / targetFps;
             const frameData = text.substring(newlineIdx + 1);
             frameBuffer.push({ data: frameData, time: frameTime });
-            triggerPlaybackStart();
+            triggerPlaybackStart(streamEpoch);
         } else {
             // Binary Frames — decoded via adaptive codec (raw/zlib/delta)
             if (codecDecoder) {
@@ -307,7 +338,7 @@ function connectWebSocket() {
                         framesInFlight--;
                         const frameTime = frameIndex / targetFps;
                         frameBuffer.push({ data: frame, time: frameTime });
-                        triggerPlaybackStart();
+                        triggerPlaybackStart(streamEpoch);
                     }).catch(e => {
                         framesInFlight--;
                         console.error("Decode error", e);
@@ -321,7 +352,7 @@ function connectWebSocket() {
                 const frameTime = frameIndex / targetFps;
                 const frameData = new Uint8Array(buffer, 4);
                 frameBuffer.push({ data: frameData, time: frameTime });
-                triggerPlaybackStart();
+                triggerPlaybackStart(streamEpoch);
             }
         }
 
@@ -354,12 +385,7 @@ function renderFrame(now) {
     if (state !== 'PLAYING' || !readyToRender) return;
     requestAnimationFrame(renderFrame);
 
-    let masterClock;
-    if (audioEl && audioEl.readyState >= 1 && !audioEl.paused) {
-        masterClock = audioEl.currentTime + audioOffset;
-    } else {
-        masterClock = (now - streamStartTime) / 1000.0;
-    }
+    const masterClock = getMasterClock();
 
     if (!isSeeking && seekBar) {
         if (now - lastUiUpdateTime >= 100) {
@@ -404,11 +430,7 @@ function renderFrame(now) {
 
     lastRenderTime = now;
 
-    if (renderMode === 1) {
-        player.style.display = 'block';
-        player.style.color = '#fff';
-        player.textContent = frame;
-    } else if (pixelMode) {
+    if (pixelMode) {
         // ── ZERO-COPY PIXEL MODE ──
         // Server sends raw BGR (3 bytes/pixel). We swap B↔R here.
         const view = frame; // Already a Uint8Array
@@ -421,6 +443,10 @@ function renderFrame(now) {
             // Alpha already set to 255 in buildCanvas
         }
         ctx.putImageData(dotImageData, 0, 0);
+    } else if (renderMode === 1) {
+        player.style.display = 'block';
+        player.style.color = '#fff';
+        player.textContent = frame;
     } else {
         // ── STANDARD COLOR MODES (2-5): fillText per character ──
         const view = frame; // Already a Uint8Array
@@ -519,6 +545,7 @@ function togglePause() {
         statusEl.style.color = '#888';
     } else if (state === 'PAUSED') {
         state = 'PLAYING';
+        readyToRender = true; // resuming an existing stream — don't block on audio gate
         
         // Update streamStartTime to account for the pause duration
         const pauseDuration = performance.now() - pauseStartTime;
@@ -575,6 +602,8 @@ function doSeek(targetSec) {
 
     if (audioEl) {
         audioEl.pause();
+        streamEpoch++;
+        const myEpoch = streamEpoch;
         audioEl.src = `/audio?v=${currentQueueIdx}&start=${targetSec}&t=${Date.now()}`;
         audioEl.load();
 
@@ -593,19 +622,29 @@ function doSeek(targetSec) {
             };
             if (audioEl.readyState >= 3) onAudioStart();
             else {
-                audioEl.addEventListener('playing', onAudioStart, { once: true });
-                setTimeout(onAudioStart, 500);
+                audioEl.addEventListener('playing', () => {
+                    if (myEpoch !== streamEpoch) return;
+                    onAudioStart();
+                }, { once: true });
+                setTimeout(() => {
+                    if (myEpoch !== streamEpoch) return;
+                    onAudioStart();
+                }, 500);
             }
         } else {
             streamStartTime = performance.now() - (targetSec * 1000.0);
+            if (state === 'PAUSED') pauseStartTime = performance.now();
         }
     } else {
         streamStartTime = performance.now() - (targetSec * 1000.0);
+        if (state === 'PAUSED') pauseStartTime = performance.now();
     }
 }
 
 function getMasterClock() {
-    if (audioEl && audioEl.readyState >= 1 && !audioEl.paused) return audioEl.currentTime + audioOffset;
+    // audioEl.currentTime is frozen when paused — correct in both states.
+    // Only fall back to the wall-clock estimate when audio hasn't loaded yet.
+    if (audioEl && audioEl.readyState >= 1) return audioEl.currentTime + audioOffset;
     return (performance.now() - streamStartTime) / 1000.0;
 }
 
@@ -675,11 +714,19 @@ container.addEventListener('click', (e) => {
     togglePause();
 });
 
-// ── KEYBOARD: Space to toggle pause ──
+// ── KEYBOARD: Space to pause, Arrows to seek, F for filters ──
 document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && (state === 'PLAYING' || state === 'PAUSED')) {
-        e.preventDefault();
-        togglePause();
+    if (state === 'PLAYING' || state === 'PAUSED') {
+        if (e.code === 'Space') {
+            e.preventDefault();
+            togglePause();
+        } else if (e.code === 'ArrowRight') {
+            e.preventDefault();
+            btnFwd.click(); // Trigger forward 10s logic
+        } else if (e.code === 'ArrowLeft') {
+            e.preventDefault();
+            btnBack.click(); // Trigger backward 10s logic
+        }
     }
 });
 
@@ -711,6 +758,7 @@ const filterGamma      = document.getElementById('filter-gamma');
 const filterBrightness = document.getElementById('filter-brightness');
 const filterSharpness  = document.getElementById('filter-sharpness');
 const filterInvertBtn  = document.getElementById('filter-invert');
+const filterPixelBtn   = document.getElementById('filter-pixel');
 const contrastVal      = document.getElementById('filter-contrast-val');
 const gammaVal         = document.getElementById('filter-gamma-val');
 const brightnessVal    = document.getElementById('filter-brightness-val');
@@ -792,6 +840,23 @@ if (filterInvertBtn) {
         filterInvertBtn.dataset.active = currentFilters.invert ? 'true' : 'false';
         filterInvertBtn.textContent = currentFilters.invert ? 'ON' : 'OFF';
         sendFilters();
+    });
+}
+
+if (filterPixelBtn) {
+    filterPixelBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            const nextMode = !pixelMode;
+            filterPixelBtn.dataset.active = nextMode ? 'true' : 'false';
+            filterPixelBtn.textContent = nextMode ? 'ON' : 'OFF';
+            const currentAbsTime = getMasterClock();
+            ws.send(JSON.stringify({
+                type: 'reinit',
+                pixel: nextMode,
+                time: currentAbsTime
+            }));
+        }
     });
 }
 

@@ -455,6 +455,19 @@ body {
         0 0 20px rgba(0, 0, 0, 0.8),
         0 0 10px rgba(0, 255, 255, 0.1) inset;
 }
+.filter-menu-inner::-webkit-scrollbar {
+    width: 6px;
+}
+.filter-menu-inner::-webkit-scrollbar-track {
+    background: transparent;
+}
+.filter-menu-inner::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 4px;
+}
+.filter-menu-inner::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-color);
+}
 .filter-header {
     display: flex;
     justify-content: space-between;
@@ -529,12 +542,21 @@ body {
 }
 
 .filter-divider {
-    text-align: center;
+    display: flex;
+    align-items: center;
     font-size: 11px;
     color: #555;
     margin: 14px 0 10px;
     letter-spacing: 2px;
 }
+.filter-divider::before,
+.filter-divider::after {
+    content: "";
+    flex: 1;
+    border-top: 1px dashed #333;
+}
+.filter-divider::before { margin-right: 10px; }
+.filter-divider::after { margin-left: 10px; }
 
 .filter-palette-group {
     display: flex;
@@ -553,6 +575,37 @@ body {
     border-radius: 3px;
     border: 1px solid transparent;
     transition: border-color 0.15s, background 0.15s;
+    position: relative;
+}
+.filter-palette-option input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+    height: 0;
+    width: 0;
+}
+.palette-radio-custom {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 1px solid #555;
+    border-radius: 50%;
+    position: relative;
+    flex-shrink: 0;
+    transition: border-color 0.2s;
+}
+.filter-palette-option input[type="radio"]:checked ~ .palette-radio-custom {
+    border-color: var(--accent-color);
+}
+.filter-palette-option input[type="radio"]:checked ~ .palette-radio-custom::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 6px;
+    height: 6px;
+    background: var(--accent-color);
+    border-radius: 50%;
 }
 .filter-palette-option:hover {
     border-color: #444;
