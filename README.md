@@ -7,6 +7,10 @@
 ╚═╝  ╚═╝╚══════╝ ╚═════╝╚═╝╚══════╝╚═╝╚═╝  ╚═══╝╚══════╝  ██
 
 ```
+<a href="https://trendshift.io/repositories/50861?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-50861" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/50861/daily?language=Python" alt="YusufB5%2FASCILINE | Trendshift" width="250" height="55"/></a>
+<a href="https://trendshift.io/repositories/50861?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-50861" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/50861/weekly?language=Python" alt="YusufB5%2FASCILINE | Trendshift" width="250" height="55"/></a>
+<a href="https://trendshift.io/repositories/50861?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-50861" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/50861/daily" alt="YusufB5%2FASCILINE | Trendshift" width="250" height="55"/></a>
+
 
 **ASCILINE** is a high-performance, cross-platform real-time ASCII video rendering engine. It maps pixels to text-based representations and streams the result over a low-overhead binary protocol, turning the browser canvas into a typographic display surface.
 
