@@ -32,7 +32,7 @@
 - [Troubleshooting](#troubleshooting)
 - [Live Demo](#live-demo)
 - [Star History](#star-history)
-- [Support ❤️](#support-)
+- [Support ❤️](#support)
 - [License](#license)
 - [Community](#community)
 - [Contact](#contact)
@@ -316,7 +316,7 @@ Quick fixes for the most common issues. Full protocol/technical details will liv
 - **YouTube/URL playback fails or hangs** — make sure `yt-dlp` is installed (`pip install yt-dlp`); it's an optional dependency and isn't required for local file playback.
 - **First-run YouTube video is slow to start** — the server downloads and normalizes it to H.264/AAC first; every replay afterward is served instantly from the `videos/` cache.
 - **Disk filling up from cached downloads** — set a lower `--cache-limit` (in MB) to cap the LRU video cache.
-- **Studio (browser compiler) output is bigger than expected, or compiling takes a long time** — the browser-side encoder only emits RAW/ZLIB/DELTA (no RLE_FULL) and is meant for short clips. For long or size-sensitive videos, use the Python compiler (`static_player/compiler.py`) instead.
+- **Studio (browser compiler) output is bigger than expected, or compiling takes a long time** — the browser-side encoder only emits RAW/ZLIB/DELTA (no RLE_FULL) and is meant for short clips. For long or size-sensitive videos, use the Python compiler (`static_player/compiler.py`) instead, then play the result with `static_player/index.html` — it's the same player either way and handles both audio and ASCII-mode playback.
 - **Compiled `.ascf` file won't play / browser runs out of memory** — keep compiled clips under 5–10 minutes; `.ascf` stores raw render instructions, so long videos can exceed browser memory limits.
 
 ## Live Demo
@@ -326,6 +326,7 @@ Live, browser-based showcase across multiple rendering modes: **[asciline.dev](h
 ## Star History
 [![Star History Chart](https://stars.unv.one/svg/YusufB5/ASCILINE?theme=dark)](https://github.com/YusufB5/ASCILINE)
 
+<a id="support"></a>
 ## Support ❤️
 
 If this project is useful to you, crypto donations are welcome:
