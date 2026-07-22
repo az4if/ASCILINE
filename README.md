@@ -326,7 +326,7 @@ Each entry can override the global `--mode`, `--pixel`, `--vol`, and `--cols`:
 [
     { "video": "intro.mp4",  "mode": 1, "vol": 1 },
     { "video": "main.mp4",   "pixel": true, "vol": 3, "cols": 520 },
-    { "video": "https://youtu.be/VIDEO_ID", "mode": 3, "vol": 2, "cols": 240 }
+    { "video": "https://youtu.be/VIDEO_ID", "mode": 4, "vol": 2, "cols": 240 }
 ]
 ```
 Paths are resolved automatically — the project root and `videos/` are both checked, so a filename alone is usually enough.
