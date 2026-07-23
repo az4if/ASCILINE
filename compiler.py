@@ -6,10 +6,7 @@ import numpy as np
 
 import sys
 
-# Add parent directory to sys.path so we can import the core engine from the root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-# Import the existing engine components
+# Import the existing engine components (now in the same directory)
 from ascii_video_player2 import VideoDecoder, AsciiMapper
 from codec import encode_frame, DEFAULT_LEVEL, ProfileEncoder
 
@@ -40,24 +37,19 @@ def get_video_dimensions(decoder):
 def compile_video(args):
     video_path = args.video
     if not os.path.exists(video_path):
-        compiler_dir = os.path.dirname(os.path.abspath(__file__))
-        root_dir = os.path.abspath(os.path.join(compiler_dir, '..'))
+        root_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # Check 1: Inside the static_player folder itself
-        fallback_1 = os.path.join(compiler_dir, video_path)
-        # Check 2: Inside the root project's videos/ folder
-        fallback_2 = os.path.join(root_dir, 'videos', video_path)
+        # Check 1: Inside the root project's videos/ folder
+        fallback_1 = os.path.join(root_dir, 'videos', video_path)
         
         if os.path.exists(fallback_1):
             video_path = fallback_1
-        elif os.path.exists(fallback_2):
-            video_path = fallback_2
         else:
-            print(f"Error: File not found -> {args.video} (Also checked static_player/ and videos/ folders)")
+            print(f"Error: File not found -> {args.video} (Also checked videos/ folder)")
             return
 
     out_name = args.out or os.path.splitext(os.path.basename(video_path))[0]
-    out_dir = os.path.dirname(os.path.abspath(__file__))
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static_player')
     os.makedirs(out_dir, exist_ok=True)
     
     ascf_path = os.path.join(out_dir, f"{out_name}.ascf")

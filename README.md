@@ -75,7 +75,7 @@ The original protocol re-sends the full grid every frame. An opt-in adaptive cod
 
 Clients opt in with `/ws?codec=adaptive`; omit it and you get the original protocol byte-for-byte, so existing clients are unaffected. A keyframe is forced periodically so dropped packets / late joiners resync.
 
-`codec.js` (the shared decoder used by both the live player and the test suite) understands all four tags. **Not every encoder produces all four**, though: the Python side (`codec.py`, used by the live server and by `static_player/compiler.py`) can emit RLE_FULL when it wins the size comparison. The browser-side JS encoder (`static_player/studio/encoder.js`, used by the client-only Studio compiler) intentionally only emits RAW/ZLIB/DELTA — it doesn't implement RLE run-building, to keep the in-browser encoder simple. RAW/ZLIB/DELTA already cover most cases reasonably well, so this is a deliberate simplicity/size trade-off, not a bug — decoders stay permissive, encoders stay conservative.
+`codec.js` (the shared decoder used by both the live player and the test suite) understands all four tags. **Not every encoder produces all four**, though: the Python side (`codec.py`, used by the live server and by `compiler.py`) can emit RLE_FULL when it wins the size comparison. The browser-side JS encoder (`static_player/studio/encoder.js`, used by the client-only Studio compiler) intentionally only emits RAW/ZLIB/DELTA — it doesn't implement RLE run-building, to keep the in-browser encoder simple. RAW/ZLIB/DELTA already cover most cases reasonably well, so this is a deliberate simplicity/size trade-off, not a bug — decoders stay permissive, encoders stay conservative.
 
 **Measured wire savings** (mode 6, 200×80 grid):
 
@@ -106,7 +106,7 @@ There are two ways to produce a `.ascf` file:
 ### 1. Python compiler (more capable and faster — the recommended default)
 
 ```bash
-python static_player/compiler.py your_video.mp4 --cols 250 --pixel --quantize 2
+python compiler.py your_video.mp4 --cols 250 --pixel --quantize 2
 ```
 
 - `--quantize 0-3`: drops color bits to reduce file size (0 = lossless, 3 = aggressive).
@@ -341,7 +341,7 @@ Quick fixes for the most common issues. Full protocol/technical details will liv
 - **YouTube/URL playback fails or hangs** — make sure `yt-dlp` is installed (`pip install yt-dlp`); it's an optional dependency and isn't required for local file playback.
 - **First-run YouTube video is slow to start** — the server downloads and normalizes it to H.264/AAC first; every replay afterward is served instantly from the `videos/` cache.
 - **Disk filling up from cached downloads** — set a lower `--cache-limit` (in MB) to cap the LRU video cache.
-- **Studio (browser compiler) output is bigger than expected, or compiling takes a long time** — the browser-side encoder only emits RAW/ZLIB/DELTA (no RLE_FULL) and is meant for short clips. For long or size-sensitive videos, use the Python compiler (`static_player/compiler.py`) instead. See [Browser Studio](#browser-studio) and [Playing a compiled file](#playing-a-compiled-file) for the two preview options.
+- **Studio (browser compiler) output is bigger than expected, or compiling takes a long time** — the browser-side encoder only emits RAW/ZLIB/DELTA (no RLE_FULL) and is meant for short clips. For long or size-sensitive videos, use the Python compiler (`compiler.py`) instead. See [Browser Studio](#browser-studio) and [Playing a compiled file](#playing-a-compiled-file) for the two preview options.
 
 ## Live Demo
 
